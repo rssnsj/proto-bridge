@@ -5,13 +5,7 @@ CC ?= gcc
 
 obj-m := pppoe_bridge.o 6bridge.o yavlan.o
 
-pppoe_bridge.ko: pppoe_bridge.c
-	make -C $(KERNSRC) M=$(shell pwd) modules
-
-6bridge.ko: 6bridge.c
-	make -C $(KERNSRC) M=$(shell pwd) modules
-
-yavlan.ko: yavlan.c
+all:
 	make -C $(KERNSRC) M=$(shell pwd) modules
 
 clean:
