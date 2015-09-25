@@ -225,20 +225,24 @@ static int yavlan_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		vlan_eth_hdr(skb)->h_vlan_TCI = htons(vi->vid);
 		/* NOTICE: Set it 0 here to let peer receive it in the correct mode. */
 		vlan_eth_hdr(skb)->h_vlan_encapsulated_proto = 0;
-	} else if (!vi->disabled_packip && eth_hdr(skb)->h_proto == __constant_htons(ETH_P_IP)) {
-		/* IPv4 packing mode. */
+	} else if (!vi->disabled_packip) {
 		if (!(skb = __headroom_and_unshare(skb, 0)))
 			goto out;
-		eth_hdr(skb)->h_proto = htons(base_proto_id + vi->vid);
-	} else if (!vi->disabled_packip && eth_hdr(skb)->h_proto == __constant_htons(ETH_P_IPV6)) {
-		/* IPv6 packing mode. */
-		if (!(skb = __headroom_and_unshare(skb, 0)))
-			goto out;
-		eth_hdr(skb)->h_proto = htons(base_proto_id - PACKIP_V4V6_PROTO_DIFF + vi->vid);
+
+		if (eth_hdr(skb)->h_proto == __constant_htons(ETH_P_IP)) {
+			/* IPv4 packing mode. */
+			eth_hdr(skb)->h_proto = htons(base_proto_id + vi->vid);
+		} else if (eth_hdr(skb)->h_proto == __constant_htons(ETH_P_IPV6)) {
+			/* IPv6 packing mode. */
+			eth_hdr(skb)->h_proto = htons(base_proto_id - PACKIP_V4V6_PROTO_DIFF + vi->vid);
+		} else {
+			goto generic_proto;
+		}
 	} else {
 		/* Regular VLAN mode with custom ethernet protocol. */
 		struct ethhdr eh;
 
+generic_proto:
 		if (!(skb = __headroom_and_unshare(skb, VLAN_HLEN)))
 			goto out;
 
