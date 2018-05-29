@@ -69,7 +69,7 @@ static inline struct yavlan_info *yavlan_get_by_phyname_vid(
 	return NULL;
 }
 
-static inline void yavlan_try_swap_mac(struct sk_buff *skb, int md)
+static inline void yavlan_swap_mac(struct sk_buff *skb, int md)
 {
 	if (md) {
 		struct ethhdr *mh = eth_hdr(skb);
@@ -116,28 +116,19 @@ static int yavlan_base_rcv(struct sk_buff *skb, struct net_device *dev,
 		memcpy(eth_hdr(skb)->h_dest, veh.h_dest, ETH_ALEN);
 		memcpy(eth_hdr(skb)->h_source, veh.h_source, ETH_ALEN);
 		eth_hdr(skb)->h_proto = proto;
-
-		/* Move back to real network header after stripping VLAN tag. */
-		skb_pull_rcsum(skb, ETH_HLEN);
-		skb_reset_network_header(skb);
-		skb_reset_transport_header(skb);
 	} else {
 		if (unlikely(!pskb_may_pull(skb, VLAN_HLEN + ETH_HLEN)))
 			goto out;
 		skb_pull(skb, VLAN_HLEN);
 		skb_reset_mac_header(skb);
-
-		skb_pull_rcsum(skb, ETH_HLEN);
-		skb_reset_network_header(skb);
-		skb_reset_transport_header(skb);
-
-		proto = eth_hdr(skb)->h_proto;
 	}
 
-	yavlan_try_swap_mac(skb, -mac_swap_factor);
+	yavlan_swap_mac(skb, -mac_swap_factor);
+	skb->pkt_type = PACKET_HOST;
+	skb->protocol = eth_type_trans(skb, vi->vlan_dev); /* ETH_HLEN pulled */
+	skb_reset_network_header(skb);
+	skb_reset_transport_header(skb);
 
-	skb->protocol = proto;
-	skb->dev = vi->vlan_dev;
 	skb->ip_summed = CHECKSUM_NONE;
 	vi->vlan_dev->stats.rx_bytes += skb->len;
 	vi->vlan_dev->stats.rx_packets++;
@@ -174,11 +165,11 @@ static int yavlan_ext_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (!(vi = yavlan_get_by_phydev_vid(dev, vid)))
 		goto out;
 
-	yavlan_try_swap_mac(skb, -mac_swap_factor);
-
 	eth_hdr(skb)->h_proto = real_proto;
-	skb->dev = vi->vlan_dev;
-	skb->protocol = real_proto;
+	yavlan_swap_mac(skb, -mac_swap_factor);
+	skb_push(skb, ETH_HLEN);
+	skb->pkt_type = PACKET_HOST;
+	skb->protocol = eth_type_trans(skb, vi->vlan_dev);
 	skb->ip_summed = CHECKSUM_NONE;
 	if (likely(netif_rx(skb) == NET_RX_SUCCESS)) {
 		vi->vlan_dev->stats.rx_bytes += skb->len;
@@ -276,7 +267,7 @@ generic_proto:
 		vlan_eth_hdr(skb)->h_vlan_encapsulated_proto = eh.h_proto;
 	}
 
-	yavlan_try_swap_mac(skb, mac_swap_factor);
+	yavlan_swap_mac(skb, mac_swap_factor);
 
 	skb->dev = vi->phy_dev;
 	dev_queue_xmit(skb);
