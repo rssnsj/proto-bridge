@@ -22,6 +22,10 @@ static int vlan_dev_mtu = 0;
 module_param_named(mtu, vlan_dev_mtu, int, 0644);
 MODULE_PARM_DESC(mtu, "Override VLAN interface MTU size");
 
+static int mac_swap_factor = 0;
+module_param_named(ms, mac_swap_factor, int, 0644);
+MODULE_PARM_DESC(ms, "MAC swapping factor");
+
 struct yavlan_info {
 	unsigned short vid;
 	struct net_device *phy_dev;
@@ -65,6 +69,16 @@ static inline struct yavlan_info *yavlan_get_by_phyname_vid(
 	return NULL;
 }
 
+static inline void yavlan_try_swap_mac(struct sk_buff *skb, int md)
+{
+	if (md) {
+		struct ethhdr *mh = eth_hdr(skb);
+		if (!is_multicast_ether_addr(mh->h_dest))
+			mh->h_dest[3] += md;
+		if (!is_multicast_ether_addr(mh->h_source))
+			mh->h_source[3] += md;
+	}
+}
 
 static int yavlan_base_rcv(struct sk_buff *skb, struct net_device *dev,
 		struct packet_type *pt, struct net_device *orig_dev)
@@ -120,6 +134,8 @@ static int yavlan_base_rcv(struct sk_buff *skb, struct net_device *dev,
 		proto = eth_hdr(skb)->h_proto;
 	}
 
+	yavlan_try_swap_mac(skb, -mac_swap_factor);
+
 	skb->protocol = proto;
 	skb->dev = vi->vlan_dev;
 	skb->ip_summed = CHECKSUM_NONE;
@@ -157,6 +173,8 @@ static int yavlan_ext_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	if (!(vi = yavlan_get_by_phydev_vid(dev, vid)))
 		goto out;
+
+	yavlan_try_swap_mac(skb, -mac_swap_factor);
 
 	eth_hdr(skb)->h_proto = real_proto;
 	skb->dev = vi->vlan_dev;
@@ -257,6 +275,8 @@ generic_proto:
 		vlan_eth_hdr(skb)->h_vlan_TCI = htons(vi->vid);
 		vlan_eth_hdr(skb)->h_vlan_encapsulated_proto = eh.h_proto;
 	}
+
+	yavlan_try_swap_mac(skb, mac_swap_factor);
 
 	skb->dev = vi->phy_dev;
 	dev_queue_xmit(skb);
