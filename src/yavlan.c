@@ -27,7 +27,7 @@ module_param_named(ms, mac_swap_factor, int, 0644);
 MODULE_PARM_DESC(ms, "MAC swapping factor");
 
 struct yavlan_info {
-	unsigned short vid;
+	int vid;
 	struct net_device *phy_dev;
 	struct net_device *vlan_dev;
 	bool disabled_packip;
@@ -42,7 +42,7 @@ static struct yavlan_info *yavlan_list[YAVLAN_LIST_SIZE];
 static int yavlan_list_count = 0;
 
 static inline struct yavlan_info *yavlan_get_by_phydev_vid(
-		struct net_device *phy_dev, unsigned short vid)
+		struct net_device *phy_dev, int vid)
 {
 	int i;
 	for (i = 0; i < yavlan_list_count; i++) {
@@ -56,7 +56,7 @@ static inline struct yavlan_info *yavlan_get_by_phydev_vid(
 }
 
 static inline struct yavlan_info *yavlan_get_by_phyname_vid(
-		const char *phy_ifname, unsigned short vid)
+		const char *phy_ifname, int vid)
 {
 	int i;
 	for (i = 0; i < yavlan_list_count; i++) {
@@ -85,7 +85,8 @@ static int yavlan_base_rcv(struct sk_buff *skb, struct net_device *dev,
 {
 	struct sk_buff *__skb;
 	struct vlan_ethhdr veh;
-	unsigned short vid, proto;
+	int vid;
+	__be16 real_proto;
 	struct yavlan_info *vi;
 
 	/* Ignore non-Ethernet packets */
@@ -101,12 +102,12 @@ static int yavlan_base_rcv(struct sk_buff *skb, struct net_device *dev,
 	veh = *vlan_eth_hdr(skb);
 
 	vid = ntohs(veh.h_vlan_TCI) & VLAN_VID_MASK;
-	proto = veh.h_vlan_encapsulated_proto;
+	real_proto = veh.h_vlan_encapsulated_proto;
 
 	if (!(vi = yavlan_get_by_phydev_vid(dev, vid)))
 		goto out;
 
-	if (proto != 0) {
+	if (real_proto != 0) {
 		/* Adjust MAC header pointer and overwrite VLAN tag. */
 		skb_push(skb, ETH_HLEN - VLAN_HLEN);
 		skb_reset_mac_header(skb);
@@ -115,7 +116,7 @@ static int yavlan_base_rcv(struct sk_buff *skb, struct net_device *dev,
 			goto out;
 		memcpy(eth_hdr(skb)->h_dest, veh.h_dest, ETH_ALEN);
 		memcpy(eth_hdr(skb)->h_source, veh.h_source, ETH_ALEN);
-		eth_hdr(skb)->h_proto = proto;
+		eth_hdr(skb)->h_proto = real_proto;
 	} else {
 		if (unlikely(!pskb_may_pull(skb, VLAN_HLEN + ETH_HLEN)))
 			goto out;
@@ -144,9 +145,9 @@ out:
 static int yavlan_ext_rcv(struct sk_buff *skb, struct net_device *dev,
 		struct packet_type *pt, struct net_device *orig_dev)
 {
-	unsigned short fake_proto, vid = 0;
+	int fake_proto, vid;
+	__be16 real_proto;
 	struct yavlan_info *vi;
-	__be16 real_proto = 0;
 
 	/* Ignore non-Ethernet packets */
 	if (!vlan_eth_hdr(skb))
@@ -372,7 +373,7 @@ static int netdev_detach_yavlan(struct net_device *phy_dev, struct yavlan_info *
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
 static int hooked_dev_event(struct notifier_block *unused,
-	unsigned long event, void *ptr)
+		unsigned long event, void *ptr)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
@@ -454,7 +455,7 @@ static int generate_vlan_defs_by_param(const char *vlan_defs)
 	cp = __vlans;
 	do {
 		char *cp_vid = NULL, *cp_pname = NULL, *cp_vname = NULL, *cp_peera = NULL;
-		unsigned vid = 0;
+		int vid = 0;
 		struct yavlan_info *vi;
 
 		/* @@@ VLAN id. */
@@ -478,18 +479,14 @@ static int generate_vlan_defs_by_param(const char *vlan_defs)
 		}
 
 		/* %%% Check VLAN id. */
-		if (sscanf(cp_vid, "%u", &vid) != 1) {
+		if (sscanf(cp_vid, "%d", &vid) != 1 || vid <= 0 || vid >= VLAN_N_VID) {
 			printk(KERN_WARNING "YaVLAN: Invalid VLAN ID: '%s'\n", cp_vid);
-			goto out;
-		}
-		if (vid == 0 || vid >= VLAN_N_VID) {
-			printk(KERN_WARNING "YaVLAN: Invalid VLAN ID: '%u'\n", vid);
 			goto out;
 		}
 
 		/* %%% Check physical interface name, with duplication check. */
-		if (yavlan_get_by_phyname_vid(cp_pname, (unsigned short)vid)) {
-			printk(KERN_WARNING "YaVLAN: Duplicate VLAN definition: %u@%s\n",
+		if (yavlan_get_by_phyname_vid(cp_pname, vid)) {
+			printk(KERN_WARNING "YaVLAN: Duplicate VLAN definition: %d@%s\n",
 					vid, cp_pname);
 			goto out;
 		}
@@ -501,14 +498,14 @@ static int generate_vlan_defs_by_param(const char *vlan_defs)
 			goto out;
 		}
 		memset(vi, 0x0, sizeof(*vi));
-		vi->vid = (unsigned short)vid;
+		vi->vid = vid;
 		strncpy(vi->phy_ifname, cp_pname, IFNAMSIZ);
 
 		/* %%% Check custom VLAN interface name and apply. */
 		if (cp_vname && strlen(cp_vname) > 0) {
 			strncpy(vi->vlan_ifname, cp_vname, IFNAMSIZ);
 		} else {
-			snprintf(vi->vlan_ifname, IFNAMSIZ, "%s-%u", vi->phy_ifname, vi->vid);
+			snprintf(vi->vlan_ifname, IFNAMSIZ, "%s-%d", vi->phy_ifname, vi->vid);
 		}
 
 		/* %%% Check peer address and apply. */
@@ -553,7 +550,7 @@ static struct packet_type yavlan_base_ptype;
 static struct packet_type yavlan_ext_ptype[YAVLAN_LIST_SIZE];
 static size_t yavlan_ext_ptype_count = 0;
 
-static inline bool __yavlan_ext_ptype_exists(unsigned short proto_id)
+static inline bool __yavlan_ext_ptype_exists(int proto_id)
 {
 	int j;
 	for (j = 0; j < yavlan_ext_ptype_count; j++) {
@@ -595,7 +592,7 @@ int __init yavlan_init(void)
 	dev_add_pack(&yavlan_base_ptype);
 
 	for (i = 0; i < yavlan_list_count; i++) {
-		unsigned short proto_id = base_proto_id + yavlan_list[i]->vid;
+		int proto_id = base_proto_id + yavlan_list[i]->vid;
 		struct packet_type *__pt = NULL;
 
 		/* To avoid duplicate hooking for a single protocol type. */
@@ -613,8 +610,7 @@ int __init yavlan_init(void)
 	}
 
 	for (i = 0; i < yavlan_list_count; i++) {
-		unsigned short proto_id = base_proto_id - PACKIP_V4V6_PROTO_DIFF +
-				yavlan_list[i]->vid;
+		int proto_id = base_proto_id - PACKIP_V4V6_PROTO_DIFF + yavlan_list[i]->vid;
 		struct packet_type *__pt = NULL;
 
 		if (__yavlan_ext_ptype_exists(proto_id))
@@ -662,5 +658,5 @@ module_exit(yavlan_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jianying Liu");
 MODULE_DESCRIPTION("YaVLAN - Yet another VLAN implementation");
-MODULE_VERSION("0.1.1");
+MODULE_VERSION("0.1.3");
 
