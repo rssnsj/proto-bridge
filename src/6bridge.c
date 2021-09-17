@@ -55,7 +55,11 @@ static int six_bridge_rcv(struct sk_buff *skb, struct net_device *dev,
 	skb = nskb;
 	mh = eth_hdr(skb);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+	nf_reset_ct(skb);
+#else
 	nf_reset(skb);
+#endif
 	skb_push(skb, skb->data - skb_mac_header(skb));
 	skb->dev = to;
 	dev_queue_xmit(skb);

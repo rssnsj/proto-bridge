@@ -207,7 +207,11 @@ static struct sk_buff *__headroom_and_unshare(struct sk_buff *skb, unsigned head
 
 	skb_orphan(skb);
 	skb_dst_drop(skb);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+	nf_reset_ct(skb);
+#else
 	nf_reset(skb);
+#endif
 	skb_reset_mac_header(skb);
 
 	return skb;
