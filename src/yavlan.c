@@ -133,6 +133,10 @@ static int yavlan_base_rcv(struct sk_buff *skb, struct net_device *dev,
 	skb->ip_summed = CHECKSUM_NONE;
 	vi->vlan_dev->stats.rx_bytes += skb->len;
 	vi->vlan_dev->stats.rx_packets++;
+#ifdef CONFIG_NET_SWITCHDEV
+	skb->offload_fwd_mark = 0;
+	skb->offload_l3_fwd_mark = 0;
+#endif
 	netif_rx(skb);
 
 	return 0;
@@ -172,6 +176,10 @@ static int yavlan_ext_rcv(struct sk_buff *skb, struct net_device *dev,
 	skb->pkt_type = PACKET_HOST;
 	skb->protocol = eth_type_trans(skb, vi->vlan_dev);
 	skb->ip_summed = CHECKSUM_NONE;
+#ifdef CONFIG_NET_SWITCHDEV
+	skb->offload_fwd_mark = 0;
+	skb->offload_l3_fwd_mark = 0;
+#endif
 	if (likely(netif_rx(skb) == NET_RX_SUCCESS)) {
 		vi->vlan_dev->stats.rx_bytes += skb->len;
 		vi->vlan_dev->stats.rx_packets++;
