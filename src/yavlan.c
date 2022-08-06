@@ -309,6 +309,8 @@ static const struct net_device_ops yavlan_netdev_ops = {
 	.ndo_open       = yavlan_start,
 	.ndo_stop       = yavlan_stop,
 	.ndo_start_xmit = yavlan_start_xmit,
+	.ndo_set_mac_address = eth_mac_addr,
+	.ndo_validate_addr   = eth_validate_addr,
 };
 
 static void yavlan_netdev_setup(struct net_device *dev)
