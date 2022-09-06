@@ -15,6 +15,7 @@ clean:
 	rm -f modules.order
 
 install: all
-	cp -av *.ko /lib/modules/$(KVER)/kernel/
+	mkdir -p /lib/modules/$(KVER)/extra
+	cp -f *.ko /lib/modules/$(KVER)/extra/
 	depmod $(KVER)
 
